@@ -163,7 +163,9 @@ async def execute_triangle_trade(base, mid1, mid2, symbols, exchange, markets, t
 
 async def load_symbols():
     markets = await exchange.load_markets()
-    return list(markets.keys()), markets
+    # Исключаем приостановленные и неактивные пары
+    active_symbols = [s for s in markets if markets[s].get("active", True)]
+    return active_symbols, markets
 
 async def find_triangles(symbols):
     triangles = []
