@@ -1,0 +1,1 @@
+worker: python3 Bybit_trading_bot.py
