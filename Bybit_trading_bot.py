@@ -226,11 +226,19 @@ async def check_triangle(base, mid1, mid2, symbols, markets):
 # === MAIN ===
 async def main():
     await telegram_app.initialize()
+
+    # === Регистрируем команду /status
     telegram_app.add_handler(CommandHandler("status", status))
+
     await telegram_app.start()
+    await telegram_app.updater.start_polling()
+
     await send_telegram_message("🤖 Бот запущен.")
+
+    # Основная логика
     symbols, markets = await load_symbols()
     triangles = await find_triangles(symbols)
+
     while True:
         tasks = [check_triangle(base, mid1, mid2, symbols, markets) for base, mid1, mid2 in triangles]
         await asyncio.gather(*tasks)
