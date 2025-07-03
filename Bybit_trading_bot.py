@@ -65,14 +65,17 @@ async def fetch_balances():
 
 # === Telegram /status команда ===
 async def status(update, context):
-    balances = await fetch_balances()
-    usdt = balances.get("USDT", 0)
-    await update.message.reply_text(
-        f"🤖 Статус бота:\n"
-        f"Режим: {'DEMO' if MODE == 'demo' else 'LIVE'}\n"
-        f"Баланс USDT: {usdt:.2f}\n"
-        f"Суммарный профит: {net_profit:.2f} USDT"
-    )
+    try:
+        balances = await fetch_balances()
+        usdt = balances.get("USDT", 0.0)
+        await update.message.reply_text(
+            f"🤖 Статус бота:\n"
+            f"Режим: {'DEMO' if MODE == 'demo' else 'LIVE'}\n"
+            f"Баланс USDT: {usdt:.2f}\n"
+            f"Суммарный профит: {net_profit:.2f} USDT"
+        )
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка при получении статуса:\n{e}")
 
 # === Вспомогательные функции ===
 def log_route(base, mid1, mid2, profit, liquidity):
