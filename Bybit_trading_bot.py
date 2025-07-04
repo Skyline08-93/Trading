@@ -119,6 +119,13 @@ async def get_execution_price(symbol, side, target_usdt):
     try:
         orderbook = await exchange.fetch_order_book(symbol)
         return await get_avg_price(orderbook['asks' if side == 'buy' else 'bids'], target_usdt)
+    except ccxt.BaseError as e:
+        if "Symbols suppension" in str(e) or "symbol suspended" in str(e):
+            print(f"[⚠️] {symbol} приостановлена — пропускаем")
+            return None, 0, 0
+        else:
+            print(f"[Ошибка стакана {symbol}]: {e}")
+            return None, 0, 0
     except Exception as e:
         print(f"[Ошибка стакана {symbol}]: {e}")
         return None, 0, 0
