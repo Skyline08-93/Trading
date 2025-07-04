@@ -1,4 +1,3 @@
-
 import ccxt.async_support as ccxt
 import asyncio
 import os
@@ -7,6 +6,7 @@ import math
 from datetime import datetime, timedelta
 from telegram.ext import Application, CommandHandler
 from telegram.constants import ParseMode
+import logging
 
 # === .env настройки ===
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -14,6 +14,21 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 API_KEY = os.getenv("API_KEY")
 API_SECRET = os.getenv("API_SECRET")
 MODE = os.getenv("MODE", "demo").lower()
+
+# === Настройки debug и логгера ===
+debug_mode = True
+if debug_mode:
+    logging.basicConfig(
+        filename="debug.log",
+        filemode="a",
+        level=logging.DEBUG,
+        format="%(asctime)s [%(levelname)s] %(message)s"
+    )
+
+def debug(msg):
+    if debug_mode:
+        print(f"[DEBUG] {msg}")
+        logging.debug(msg)
 
 # === Telegram и биржа ===
 telegram_app = Application.builder().token(TELEGRAM_TOKEN).build()
@@ -28,16 +43,15 @@ exchange = ccxt.bybit({
 })
 if MODE == "demo":
     exchange.set_sandbox_mode(True)
-    print("⚙️ Работаем в DEMO режиме")
+    debug("⚙️ Работаем в DEMO режиме")
 else:
-    print("⚙️ Работаем в LIVE режиме")
+    debug("⚙️ Работаем в LIVE режиме")
 
 # === Глобальные настройки ===
 commission_rate = 0.001
 min_profit = 0.1
 target_volume_usdt = 100
 start_coins = ['USDT', 'BTC', 'ETH']
-debug_mode = True
 triangle_hold_time = 5
 log_file = "triangle_log.csv"
 in_trade = False
@@ -52,15 +66,14 @@ async def send_telegram_message(text):
     try:
         await telegram_app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=text, parse_mode=ParseMode.HTML)
     except Exception as e:
-        if debug_mode:
-            print(f"[Ошибка Telegram]: {e}")
+        debug(f"[Ошибка Telegram]: {e}")
 
 async def fetch_balances():
     try:
         balances = await exchange.fetch_balance()
         return balances["total"]
     except Exception as e:
-        print(f"[Ошибка баланса]: {e}")
+        debug(f"[Ошибка баланса]: {e}")
         return {}
 
 # === Telegram /status команда ===
@@ -121,13 +134,13 @@ async def get_execution_price(symbol, side, target_usdt):
         return await get_avg_price(orderbook['asks' if side == 'buy' else 'bids'], target_usdt)
     except ccxt.BaseError as e:
         if "Symbols suppension" in str(e) or "symbol suspended" in str(e):
-            print(f"[⚠️] {symbol} приостановлена — пропускаем")
+            debug(f"[⚠️] {symbol} приостановлена — пропускаем")
             return None, 0, 0
         else:
-            print(f"[Ошибка стакана {symbol}]: {e}")
+            debug(f"[Ошибка стакана {symbol}]: {e}")
             return None, 0, 0
     except Exception as e:
-        print(f"[Ошибка стакана {symbol}]: {e}")
+        debug(f"[Ошибка стакана {symbol}]: {e}")
         return None, 0, 0
 
 async def execute_trade_step(symbol, side, usdt_amount, exchange, markets):
@@ -140,10 +153,10 @@ async def execute_trade_step(symbol, side, usdt_amount, exchange, markets):
         amount = await round_to_precision(amount, meta['amount_precision'])
         price = await round_to_precision(price, meta['price_precision'])
         if price * amount < meta['min_cost']: return None
-        print(f"[🔄] Ордер: {side.upper()} {amount} {symbol} по {price}")
+        debug(f"[🔄] Ордер: {side.upper()} {amount} {symbol} по {price}")
         return await exchange.create_order(symbol, "market", side, amount)
     except Exception as e:
-        print(f"[❌] Ошибка при ордере {symbol} {side}: {e}")
+        debug(f"[❌] Ошибка при ордере {symbol} {side}: {e}")
         await send_telegram_message(f"❌ Ошибка при ордере {symbol} {side}: {e}")
         return None
 
@@ -158,7 +171,7 @@ async def execute_triangle_trade(base, mid1, mid2, symbols, exchange, markets, t
     if len(recent_trades) >= MAX_TRADES_PER_MIN: return
     in_trade = True
     try:
-        print(f"🚀 Торговля: {base} → {mid1} → {mid2} → {base}")
+        debug(f"🚀 Торговля: {base} → {mid1} → {mid2} → {base}")
         s1 = f"{mid1}/{base}" if f"{mid1}/{base}" in symbols else f"{base}/{mid1}"
         s2 = f"{mid2}/{mid1}" if f"{mid2}/{mid1}" in symbols else f"{mid1}/{mid2}"
         s3 = f"{mid2}/{base}" if f"{mid2}/{base}" in symbols else f"{base}/{mid2}"
@@ -172,10 +185,14 @@ async def execute_triangle_trade(base, mid1, mid2, symbols, exchange, markets, t
         in_trade = False
 
 async def load_symbols():
-    markets = await exchange.load_markets()
-    # Исключаем приостановленные и неактивные пары
-    active_symbols = [s for s in markets if markets[s].get("active", True)]
-    return active_symbols, markets
+    try:
+        markets = await exchange.load_markets()
+        active_symbols = [s for s in markets if markets[s].get("active", True)]
+        filtered_symbols = [s for s in active_symbols if s.endswith('/USDT') or s.endswith('/USDC')]
+        return filtered_symbols, markets
+    except Exception as e:
+        debug(f"[Ошибка load_symbols]: {e}")
+        return [], {}
 
 async def find_triangles(symbols):
     triangles = []
@@ -193,6 +210,7 @@ async def find_triangles(symbols):
 
 async def check_triangle(base, mid1, mid2, symbols, markets):
     try:
+        debug(f"📈 Проверка маршрута: {base} → {mid1} → {mid2} → {base}")
         s1 = f"{mid1}/{base}" if f"{mid1}/{base}" in symbols else f"{base}/{mid1}"
         s2 = f"{mid2}/{mid1}" if f"{mid2}/{mid1}" in symbols else f"{mid1}/{mid2}"
         s3 = f"{mid2}/{base}" if f"{mid2}/{base}" in symbols else f"{base}/{mid2}"
@@ -227,26 +245,26 @@ async def check_triangle(base, mid1, mid2, symbols, markets):
         if balances.get(base, 0) >= target_volume_usdt:
             await execute_triangle_trade(base, mid1, mid2, symbols, exchange, markets, target_volume_usdt, profit_percent, pure_profit_usdt)
     except Exception as e:
-        print(f"[Ошибка маршрута]: {e}")
+        debug(f"[Ошибка маршрута]: {e}")
         await send_telegram_message(f"❌ Ошибка: {e}")
 
 # === MAIN ===
 async def main():
     await telegram_app.initialize()
-
-    # === Регистрируем команду /status
     telegram_app.add_handler(CommandHandler("status", status))
-
     await telegram_app.start()
     await telegram_app.updater.start_polling()
 
     await send_telegram_message("🤖 Бот запущен.")
 
-    # Основная логика
+    debug("🔄 Загрузка символов и маркетов...")
     symbols, markets = await load_symbols()
+    debug(f"✅ Загрузка завершена. Найдено {len(symbols)} символов.")
     triangles = await find_triangles(symbols)
+    debug(f"🔺 Найдено {len(triangles)} треугольников.")
 
     while True:
+        debug("🔍 Новая проверка треугольников...")
         tasks = [check_triangle(base, mid1, mid2, symbols, markets) for base, mid1, mid2 in triangles]
         await asyncio.gather(*tasks)
         await asyncio.sleep(10)
